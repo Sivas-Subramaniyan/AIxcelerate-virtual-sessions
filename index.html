@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Virtual Learning Corridor</title>
+
+<style>
+:root{
+  --bg:#0b0f0e;
+  --border:#1f2a26;
+  --text:#ffffff;
+  --muted:#9fb3ab;
+  --shell:#ffd400;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:system-ui,Segoe UI,Arial;
+  background:
+    radial-gradient(900px 500px at 15% -10%, rgba(255,212,0,.18), transparent 50%),
+    radial-gradient(900px 500px at 85% 110%, rgba(29,185,84,.18), transparent 50%),
+    var(--bg);
+  color:var(--text);
+}
+.container{max-width:1200px;margin:auto;padding:32px 20px 64px}
+
+/* HEADER */
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}
+.admin-pill{background:#16201c;border:1px solid var(--border);padding:10px 14px;border-radius:999px;cursor:pointer}
+
+/* ROOMS */
+.rooms{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+@media(max-width:900px){.rooms{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.rooms{grid-template-columns:1fr}}
+
+.card{
+  border-radius:20px;padding:20px;min-height:280px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  box-shadow:0 12px 30px rgba(0,0,0,.35)
+}
+.card.disabled{opacity:.5;filter:grayscale(1)}
+.meta{font-size:13px;opacity:.85;margin:6px 0}
+
+/* STATUS */
+.status-line{display:flex;align-items:center;gap:8px}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#9fb3ab}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(0,255,106,.7)}
+  70%{box-shadow:0 0 0 10px rgba(0,255,106,0)}
+  100%{box-shadow:0 0 0 0 rgba(0,255,106,0)}
+}
+.status-dot.started{background:#00ff6a;animation:pulse 1.5s infinite}
+
+/* JOIN */
+.join{background:#fff;color:#000;padding:10px 16px;border-radius:999px;font-weight:600;cursor:pointer;text-align:center}
+
+/* THEMES */
+.foundations{background:linear-gradient(135deg,#1db954,#0f3d2e)}
+.change{background:linear-gradient(135deg,#ffd400,#8a6b00);color:#000}
+.ba{background:linear-gradient(135deg,#2dd4bf,#0f766e)}
+.xd{background:linear-gradient(135deg,#a78bfa,#4c1d95)}
+.lounge{background:linear-gradient(135deg,#fb7185,#7f1d1d)}
+
+/* ADMIN SIDEBAR */
+.drawer{
+  position:fixed;top:0;left:0;width:360px;height:100%;
+  background:#0f1513;border-right:1px solid var(--border);
+  transform:translateX(-100%);transition:.3s ease;
+  padding:20px;z-index:1000
+}
+.drawer.open{transform:translateX(0)}
+.sidebar-room{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+
+/* INPUTS */
+.input,textarea{width:100%;padding:10px;margin-bottom:10px;border-radius:12px;border:1px solid var(--border);background:#0b0f0e;color:#fff}
+.btn{padding:10px 14px;border-radius:999px;border:none;cursor:pointer}
+.primary{background:var(--shell);color:#000}
+
+/* MODALS */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:2000}
+.modal-box{max-width:600px;margin:6vh auto;background:#0f1513;border-radius:18px;padding:20px}
+</style>
+</head>
+
+<body>
+<div class="container">
+  <div class="topbar">
+    <h1 id="programName">Virtual Learning Corridor</h1>
+    <div class="admin-pill" onclick="openLogin()">Admin</div>
+  </div>
+  <div class="rooms" id="rooms"></div>
+</div>
+
+<!-- LOGIN -->
+<div class="modal" id="loginModal">
+  <div class="modal-box">
+    <h3>Admin Login</h3>
+    <input class="input" id="loginUser" placeholder="Username"/>
+    <input class="input" id="loginPwd" type="password" placeholder="Password"/>
+    <button class="btn primary" onclick="login()">Login</button>
+  </div>
+</div>
+
+<!-- ADMIN SIDEBAR -->
+<div class="drawer" id="drawer">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h3>Admin Console</h3>
+    <button class="btn" onclick="toggleDrawer()">⟨</button>
+  </div>
+
+  <div id="adminRooms"></div>
+
+  <button class="btn primary" onclick="exportConfig()">Export rooms.json</button>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="modal" id="editModal">
+  <div class="modal-box">
+    <h3>Edit Room</h3>
+    <input class="input" id="eTitle" placeholder="Title"/>
+    <input class="input" id="eSubtitle" placeholder="Subtitle"/>
+    <input class="input" id="ePersona" placeholder="Persona"/>
+    <textarea class="input" id="eDescription" placeholder="Description"></textarea>
+    <input class="input" type="datetime-local" id="eStart"/>
+    <input class="input" id="eLink" placeholder="Teams link"/>
+    <label><input type="checkbox" id="eEnabled"/> Enabled</label>
+    <button class="btn" onclick="resetCounter()">Reset join counter</button>
+    <div style="display:flex;justify-content:flex-end;gap:10px">
+      <button class="btn" onclick="closeEdit()">Cancel</button>
+      <button class="btn primary" onclick="saveEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const ADMIN={user:'Shell_ADT',pwd:'Deloitte123'};
+let DATA=null, ROOMS=[], activeRoom=null;
+
+/* LOAD JSON */
+async function loadConfig(){
+  const res = await fetch('rooms.json');
+  DATA = await res.json();
+  ROOMS = DATA.rooms.sort((a,b)=>a.displayOrder-b.displayOrder);
+  document.getElementById('programName').innerText = DATA.meta.programName;
+  render();
+}
+
+/* STATUS */
+function isStarted(r){
+  if(r.session?.statusMode === 'manual') return true;
+  if(!r.session?.startTime) return false;
+  return new Date() >= new Date(r.session.startTime);
+}
+
+/* RENDER FRONTEND */
+function render(){
+  rooms.innerHTML = ROOMS.map(r=>{
+    const started=isStarted(r);
+    const enabled=r.access.enabled!==false;
+    r.metrics ||= { portalJoinClicks:0 };
+    return `
+      <div class="card ${r.theme.styleClass} ${!enabled?'disabled':''}">
+        <div>
+          <h3>${r.title}</h3>
+          <div class="meta">${r.subtitle||''}</div>
+          <div class="status-line">
+            <span class="status-dot ${started?'started':''}"></span>
+            ${started?'Started':'Not started'}
+          </div>
+          <div class="meta">Persona: ${r.persona}</div>
+          <div class="meta">👥 ${r.metrics.portalJoinClicks} joined from portal</div>
+          <p>${r.description}</p>
+        </div>
+        ${enabled ? `<div class="join" onclick="join('${r.id}')">Enter room</div>` : `<div class="meta">Room closed</div>`}
+      </div>`;
+  }).join('');
+}
+
+/* JOIN */
+function join(id){
+  const r=ROOMS.find(x=>x.id===id);
+  r.metrics.portalJoinClicks++;
+  render();
+  window.open(r.access.meetingLink,'_blank');
+}
+
+/* ADMIN */
+function openLogin(){loginModal.style.display='block'}
+function login(){
+  if(loginUser.value===ADMIN.user && loginPwd.value===ADMIN.pwd){
+    loginModal.style.display='none';
+    drawer.classList.add('open');
+    renderAdmin();
+  } else alert('Invalid credentials');
+}
+function toggleDrawer(){drawer.classList.toggle('open')}
+
+function renderAdmin(){
+  adminRooms.innerHTML = ROOMS.map(r=>`
+    <div class="sidebar-room">
+      <span>${r.title}</span>
+      <button class="btn" onclick="openEdit('${r.id}')">Edit</button>
+    </div>
+  `).join('');
+}
+
+/* EDIT */
+function openEdit(id){
+  activeRoom = ROOMS.find(r=>r.id===id);
+  eTitle.value = activeRoom.title;
+  eSubtitle.value = activeRoom.subtitle||'';
+  ePersona.value = activeRoom.persona||'';
+  eDescription.value = activeRoom.description||'';
+  eStart.value = activeRoom.session.startTime||'';
+  eLink.value = activeRoom.access.meetingLink||'';
+  eEnabled.checked = activeRoom.access.enabled!==false;
+  editModal.style.display='block';
+}
+function closeEdit(){editModal.style.display='none'}
+function saveEdit(){
+  activeRoom.title = eTitle.value;
+  activeRoom.subtitle = eSubtitle.value;
+  activeRoom.persona = ePersona.value;
+  activeRoom.description = eDescription.value;
+  activeRoom.session.startTime = eStart.value;
+  activeRoom.access.meetingLink = eLink.value;
+  activeRoom.access.enabled = eEnabled.checked;
+  closeEdit();
+  render();
+  renderAdmin();
+}
+function resetCounter(){
+  activeRoom.metrics.portalJoinClicks = 0;
+  render();
+}
+
+/* EXPORT */
+function exportConfig(){
+  DATA.meta.lastUpdated = new Date().toISOString();
+  DATA.rooms = ROOMS;
+  const blob = new Blob([JSON.stringify(DATA,null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'rooms.json';
+  a.click();
+}
+
+loadConfig();
+</script>
+</body>
+</html>
